@@ -56,17 +56,17 @@
 using std::atan2;
 using std::cos;
 using std::sin;
+//使用using可以直接使用sin这些，而不需要加入前缀std：：
 
-const double scanPeriod = 0.1;
-
-const int systemDelay = 0; 
-int systemInitCount = 0;
-bool systemInited = false;
+const double scanPeriod = 0.1;    //扫描间隔  0.1s
+const int systemDelay = 0;         //系统延迟
+int systemInitCount = 0;          //系统初始化的次数
+bool systemInited = false;        //是否已初始化
 int N_SCANS = 0;
 float cloudCurvature[400000];
 int cloudSortInd[400000];
 int cloudNeighborPicked[400000];
-int cloudLabel[400000];
+int cloudLabel[400000];                        //参数设置
 
 bool comp (int i,int j) { return (cloudCurvature[i]<cloudCurvature[j]); }
 
@@ -75,7 +75,7 @@ ros::Publisher pubCornerPointsSharp;
 ros::Publisher pubCornerPointsLessSharp;
 ros::Publisher pubSurfPointsFlat;
 ros::Publisher pubSurfPointsLessFlat;
-ros::Publisher pubRemovePoints;
+ros::Publisher pubRemovePoints;    //定义了ROS中的发布器（Publisher）点云对象，经过处理后会分为边缘点，less边沿点，平面点和less平面点。
 std::vector<ros::Publisher> pubEachScan;
 
 bool PUB_EACH_LINE = false;
@@ -85,35 +85,35 @@ double MINIMUM_RANGE = 0.1;
 template <typename PointT>
 //作用是从输入的点云 cloud_in 中移除那些距离原点太近的点，即小于 thres 的点。移除后的点云结果存储在 cloud_out 中。
 void removeClosedPointCloud(const pcl::PointCloud<PointT> &cloud_in,
-                              pcl::PointCloud<PointT> &cloud_out, float thres)
+                              pcl::PointCloud<PointT> &cloud_out, float thres)  //输入点云和输出点云以及thres阈值
 {
-    if (&cloud_in != &cloud_out)
+    if (&cloud_in != &cloud_out)      //检查 cloud_in 和 cloud_out 是否是不同的对象
     {
         cloud_out.header = cloud_in.header;
-        cloud_out.points.resize(cloud_in.points.size());
-    }
+        cloud_out.points.resize(cloud_in.points.size());      //确保 cloud_out 具有与 cloud_in 相同数量的点云数据，以便后续的操作可以正确存储数据。
+    }                      
 
-    size_t j = 0;
-
+    size_t j = 0;         //size_t 是一种用于表示大小或索引的数据类型
+  // 循环遍历输入云中的所有点
     for (size_t i = 0; i < cloud_in.points.size(); ++i)
-    {
+    {    // 计算点到原点的距离的平方
         if (cloud_in.points[i].x * cloud_in.points[i].x + cloud_in.points[i].y * cloud_in.points[i].y + cloud_in.points[i].z * cloud_in.points[i].z < thres * thres)
-            continue;
+            continue;// 如果满足条件，则跳过这个点
         cloud_out.points[j] = cloud_in.points[i];
         j++;
     }
     if (j != cloud_in.points.size())
-    {
+    {  // 如果输出云中的点数量不等于输入云中的点数量则调整输出云的大小，以匹配实际的点数
         cloud_out.points.resize(j);
     }
-
+    // 设置输出云的高为1，长度为实际保留的点的数量，然后属性为是稠密点云。
     cloud_out.height = 1;
     cloud_out.width = static_cast<uint32_t>(j);
     cloud_out.is_dense = true;
 }
 
 void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
-{
+{    // 检查系统是否已初始化
     if (!systemInited)
     { 
         systemInitCount++;
@@ -124,20 +124,21 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
         else
             return;
     }
-
+    
     TicToc t_whole;
     TicToc t_prepare;
     std::vector<int> scanStartInd(N_SCANS, 0);
     std::vector<int> scanEndInd(N_SCANS, 0);
-
+    // 从ROS消息中提取激光点云数据
     pcl::PointCloud<pcl::PointXYZ> laserCloudIn;
+    // 使用 pcl::fromROSMsg 函数将 ROS 消息中的点云数据转换为 pcl::PointCloud 对象
     pcl::fromROSMsg(*laserCloudMsg, laserCloudIn);
     std::vector<int> indices;
-
+     // 移除包含无效数据的点云
     pcl::removeNaNFromPointCloud(laserCloudIn, laserCloudIn, indices);
     removeClosedPointCloud(laserCloudIn, laserCloudIn, MINIMUM_RANGE);
 
-
+    
     int cloudSize = laserCloudIn.points.size();
     float startOri = -atan2(laserCloudIn.points[0].y, laserCloudIn.points[0].x);
     float endOri = -atan2(laserCloudIn.points[cloudSize - 1].y,
