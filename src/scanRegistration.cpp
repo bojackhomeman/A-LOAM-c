@@ -83,6 +83,7 @@ bool PUB_EACH_LINE = false;
 double MINIMUM_RANGE = 0.1; 
 
 template <typename PointT>
+//作用是从输入的点云 cloud_in 中移除那些距离原点太近的点，即小于 thres 的点。移除后的点云结果存储在 cloud_out 中。
 void removeClosedPointCloud(const pcl::PointCloud<PointT> &cloud_in,
                               pcl::PointCloud<PointT> &cloud_out, float thres)
 {
