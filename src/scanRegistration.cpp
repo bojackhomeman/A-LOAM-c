@@ -134,17 +134,20 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
     // 使用 pcl::fromROSMsg 函数将 ROS 消息中的点云数据转换为 pcl::PointCloud 对象
     pcl::fromROSMsg(*laserCloudMsg, laserCloudIn);
     std::vector<int> indices;
-     // 移除包含无效数据的点云
+     // 移除包含无效数据的点云NaN
     pcl::removeNaNFromPointCloud(laserCloudIn, laserCloudIn, indices);
+     // 移除距离激光雷达太近的点
     removeClosedPointCloud(laserCloudIn, laserCloudIn, MINIMUM_RANGE);
 
-    
+    // 计算输入点云的大小
     int cloudSize = laserCloudIn.points.size();
+   // 计算第一个点的水平方向角度
     float startOri = -atan2(laserCloudIn.points[0].y, laserCloudIn.points[0].x);
+  // 计算最后一个点的水平方向角度
     float endOri = -atan2(laserCloudIn.points[cloudSize - 1].y,
                           laserCloudIn.points[cloudSize - 1].x) +
                    2 * M_PI;
-
+    //M_PI一直没找到出处，后俩发现是π，这两句应该是保证角度不会突变
     if (endOri - startOri > 3 * M_PI)
     {
         endOri -= 2 * M_PI;
@@ -154,23 +157,25 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
         endOri += 2 * M_PI;
     }
     //printf("end Ori %f\n", endOri);
-
+    
     bool halfPassed = false;
     int count = cloudSize;
     PointType point;
     std::vector<pcl::PointCloud<PointType>> laserCloudScans(N_SCANS);
+   // 遍历每个点
     for (int i = 0; i < cloudSize; i++)
     {
         point.x = laserCloudIn.points[i].x;
         point.y = laserCloudIn.points[i].y;
         point.z = laserCloudIn.points[i].z;
-
+    // 计算点的垂直角度
         float angle = atan(point.z / sqrt(point.x * point.x + point.y * point.y)) * 180 / M_PI;
         int scanID = 0;
-
+    // 根据不同激光雷达模型来判断点所属的扫描线
+      //由这个公式可知允许的angle很小，只有15以下才可以。
         if (N_SCANS == 16)
         {
-            scanID = int((angle + 15) / 2 + 0.5);
+            scanID = int((angle + 15) / 2 + 0.5);  //不太清楚为什么要这么算。
             if (scanID > (N_SCANS - 1) || scanID < 0)
             {
                 count--;
@@ -206,8 +211,9 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
             ROS_BREAK();
         }
         //printf("angle %f scanID %d \n", angle, scanID);
-
+      // 计算点的水平方向角度
         float ori = -atan2(point.y, point.x);
+      //同上1
         if (!halfPassed)
         { 
             if (ori < startOri - M_PI / 2)
@@ -236,31 +242,35 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
                 ori -= 2 * M_PI;
             }
         }
-
-        float relTime = (ori - startOri) / (endOri - startOri);
-        point.intensity = scanID + scanPeriod * relTime;
-        laserCloudScans[scanID].push_back(point); 
+      // 计算点的强度信息（？）
+        float relTime = (ori - startOri) / (endOri - startOri);  //相对时间值,现在位置减去初始位置比上结束和初始之差，是个相对进度
+        point.intensity = scanID + scanPeriod * relTime;      //相对时间×总时间就是现在时间，加上scanID成为强度，不太理解。（大概原因应该是因为整个论文假设匀速变换所以可以这么计算，还需要进一步验证）
+      // 将点划分到对应的扫描线中  
+      laserCloudScans[scanID].push_back(point); 
     }
     
     cloudSize = count;
     printf("points size %d \n", cloudSize);
-
+   // 创建一个 PCL 点云对象
     pcl::PointCloud<PointType>::Ptr laserCloud(new pcl::PointCloud<PointType>());
+  // 遍历每个激光扫描线
     for (int i = 0; i < N_SCANS; i++)
-    { 
+    {   
+        // 前后五个点组成一组
         scanStartInd[i] = laserCloud->size() + 5;
         *laserCloud += laserCloudScans[i];
         scanEndInd[i] = laserCloud->size() - 6;
     }
 
     printf("prepare time %f \n", t_prepare.toc());
-
+    // 计算曲率信息
     for (int i = 5; i < cloudSize - 5; i++)
-    { 
+    {   
+       // 计算 X、Y、Z 方向上的差值
         float diffX = laserCloud->points[i - 5].x + laserCloud->points[i - 4].x + laserCloud->points[i - 3].x + laserCloud->points[i - 2].x + laserCloud->points[i - 1].x - 10 * laserCloud->points[i].x + laserCloud->points[i + 1].x + laserCloud->points[i + 2].x + laserCloud->points[i + 3].x + laserCloud->points[i + 4].x + laserCloud->points[i + 5].x;
         float diffY = laserCloud->points[i - 5].y + laserCloud->points[i - 4].y + laserCloud->points[i - 3].y + laserCloud->points[i - 2].y + laserCloud->points[i - 1].y - 10 * laserCloud->points[i].y + laserCloud->points[i + 1].y + laserCloud->points[i + 2].y + laserCloud->points[i + 3].y + laserCloud->points[i + 4].y + laserCloud->points[i + 5].y;
         float diffZ = laserCloud->points[i - 5].z + laserCloud->points[i - 4].z + laserCloud->points[i - 3].z + laserCloud->points[i - 2].z + laserCloud->points[i - 1].z - 10 * laserCloud->points[i].z + laserCloud->points[i + 1].z + laserCloud->points[i + 2].z + laserCloud->points[i + 3].z + laserCloud->points[i + 4].z + laserCloud->points[i + 5].z;
-
+        // 计算曲率
         cloudCurvature[i] = diffX * diffX + diffY * diffY + diffZ * diffZ;
         cloudSortInd[i] = i;
         cloudNeighborPicked[i] = 0;
@@ -269,18 +279,22 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
 
 
     TicToc t_pts;
-
+    
+// 创建 PCL 点云对象来存储不同类型的特征点
     pcl::PointCloud<PointType> cornerPointsSharp;
     pcl::PointCloud<PointType> cornerPointsLessSharp;
     pcl::PointCloud<PointType> surfPointsFlat;
     pcl::PointCloud<PointType> surfPointsLessFlat;
 
     float t_q_sort = 0;
+   // 遍历每个激光扫描线
     for (int i = 0; i < N_SCANS; i++)
-    {
+    {     // 如果该扫描线上的点数量小于 6，跳过
         if( scanEndInd[i] - scanStartInd[i] < 6)
             continue;
+        // 创建 PCL 点云对象来存储扫描线上的平面点
         pcl::PointCloud<PointType>::Ptr surfPointsLessFlatScan(new pcl::PointCloud<PointType>);
+       // 将每个扫描线分为 6 等分，并处理每一部分
         for (int j = 0; j < 6; j++)
         {
             int sp = scanStartInd[i] + (scanEndInd[i] - scanStartInd[i]) * j / 6; 
