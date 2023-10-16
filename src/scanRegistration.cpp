@@ -272,9 +272,14 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
         float diffZ = laserCloud->points[i - 5].z + laserCloud->points[i - 4].z + laserCloud->points[i - 3].z + laserCloud->points[i - 2].z + laserCloud->points[i - 1].z - 10 * laserCloud->points[i].z + laserCloud->points[i + 1].z + laserCloud->points[i + 2].z + laserCloud->points[i + 3].z + laserCloud->points[i + 4].z + laserCloud->points[i + 5].z;
         // 计算曲率
         cloudCurvature[i] = diffX * diffX + diffY * diffY + diffZ * diffZ;
-        cloudSortInd[i] = i;
-        cloudNeighborPicked[i] = 0;
+        cloudSortInd[i] = i;  // 点云ID
+        cloudNeighborPicked[i] = 0;  //点没被选择过，设置为0.，后续当被选为特征点之后，将被设置为1
         cloudLabel[i] = 0;
+      // Label 2: corner_sharp曲率大（角点）
+      // Label 1: corner_less_sharp, 包含Label 2（曲率稍微小的点，降采样角点）
+      // Label -1: surf_flat（平面点）
+      // Label 0: surf_less_flat， 包含Label -1，因为点太多，最后会降采样
+
     }
 
 
@@ -297,13 +302,14 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
        // 将每个扫描线分为 6 等分，并处理每一部分
         for (int j = 0; j < 6; j++)
         {
-            int sp = scanStartInd[i] + (scanEndInd[i] - scanStartInd[i]) * j / 6; 
-            int ep = scanStartInd[i] + (scanEndInd[i] - scanStartInd[i]) * (j + 1) / 6 - 1;
-
+            int sp = scanStartInd[i] + (scanEndInd[i] - scanStartInd[i]) * j / 6;   //start point
+            int ep = scanStartInd[i] + (scanEndInd[i] - scanStartInd[i]) * (j + 1) / 6 - 1;   //end point
+  
             TicToc t_tmp;
-            std::sort (cloudSortInd + sp, cloudSortInd + ep + 1, comp);
+            std::sort (cloudSortInd + sp, cloudSortInd + ep + 1, comp);  // 对6等份内的点云曲率进行排列，
             t_q_sort += t_tmp.toc();
-
+          
+            // 对6等份内的点，按照曲率进行划分，分为sharp，lessSharp，flat，lessFlat四类点
             int largestPickedNum = 0;
             for (int k = ep; k >= sp; k--)
             {
@@ -314,16 +320,16 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
                 {
 
                     largestPickedNum++;
-                    if (largestPickedNum <= 2)
+                    if (largestPickedNum <= 2)     // 选2个sharp点
                     {                        
                         cloudLabel[ind] = 2;
-                        cornerPointsSharp.push_back(laserCloud->points[ind]);
-                        cornerPointsLessSharp.push_back(laserCloud->points[ind]);
+                        cornerPointsSharp.push_back(laserCloud->points[ind]);    // 存储于cornerPointsSharp中
+                        cornerPointsLessSharp.push_back(laserCloud->points[ind]);  // 同时也存储进cornerPointsLessSharp中
                     }
-                    else if (largestPickedNum <= 20)
+                    else if (largestPickedNum <= 20)    // 选18个lessSharp点
                     {                        
                         cloudLabel[ind] = 1; 
-                        cornerPointsLessSharp.push_back(laserCloud->points[ind]);
+                        cornerPointsLessSharp.push_back(laserCloud->points[ind]);  // 存储进cornerPointsLessSharp中
                     }
                     else
                     {
