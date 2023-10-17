@@ -496,7 +496,7 @@ int main(int argc, char **argv)
         printf("only support velodyne with 16, 32 or 64 scan line!");
         return 0;
     }
-
+    // 向odometry部分发布处理完毕的点云
     ros::Subscriber subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>("/velodyne_points", 100, laserCloudHandler);
 
     pubLaserCloud = nh.advertise<sensor_msgs::PointCloud2>("/velodyne_cloud_2", 100);
