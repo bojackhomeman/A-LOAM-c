@@ -274,14 +274,18 @@ int main(int argc, char **argv)
             TicToc t_whole;
             // initializing
             if (!systemInited)
-            {
+            {    
+
                 systemInited = true;
                 std::cout << "Initialization finished \n";
             }
             else
             {
-                int cornerPointsSharpNum = cornerPointsSharp->points.size();
-                int surfPointsFlatNum = surfPointsFlat->points.size();
+            // 从第二帧开始，做帧间（当前帧与上一帧）匹配
+            // 当前帧的sharp（cornerPointsSharp）与上一帧的sharp + lessSharp（laserCloudCornerLast）做匹配
+            // 当前帧的flat（cornerPointsFlat）与上一帧的flat + lessFlat（laserCloudSurfLast）做匹配
+                int cornerPointsSharpNum = cornerPointsSharp->points.size();// 当前帧sharp点数 
+                int surfPointsFlatNum = surfPointsFlat->points.size();// 当前帧flat点数 
 
                 TicToc t_opt;
                 for (size_t opti_counter = 0; opti_counter < 2; ++opti_counter)
