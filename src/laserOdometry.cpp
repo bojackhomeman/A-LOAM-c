@@ -34,6 +34,8 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+//基于以上scanRegistration发布的四类点云信息，进行帧与帧之间的点云匹配，得到帧与帧之间的相对位姿变换，得到基于odometry轨迹
+
 #include <cmath>
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
@@ -108,6 +110,7 @@ std::queue<sensor_msgs::PointCloud2ConstPtr> fullPointsBuf;
 std::mutex mBuf;
 
 // undistort lidar point
+//将当前帧的激光点云数据进行去畸变和坐标变换，将其变换到下一帧的起始点。
 void TransformToStart(PointType const *const pi, PointType *const po)
 {
     //interpolation ratio
@@ -129,7 +132,7 @@ void TransformToStart(PointType const *const pi, PointType *const po)
 }
 
 // transform all lidar points to the start of the next frame
-
+//将激光雷达点云数据从当前帧的坐标系转换到下一帧的终止点坐标系
 void TransformToEnd(PointType const *const pi, PointType *const po)
 {
     // undistort point first
@@ -146,10 +149,11 @@ void TransformToEnd(PointType const *const pi, PointType *const po)
     //Remove distortion time info
     po->intensity = int(pi->intensity);
 }
-
+//处理四种点云信息的函数
 void laserCloudSharpHandler(const sensor_msgs::PointCloud2ConstPtr &cornerPointsSharp2)
 {
     mBuf.lock();
+     // 将传感器发布的锐角点云消息（cornerPointsSharp2）存储到相应的缓冲队列（cornerSharpBuf）中
     cornerSharpBuf.push(cornerPointsSharp2);
     mBuf.unlock();
 }
@@ -191,9 +195,13 @@ int main(int argc, char **argv)
     nh.param<int>("mapping_skip_frame", skipFrameNum, 2);
 
     printf("Mapping %d Hz \n", 10 / skipFrameNum);
-
+   // 各类点云handler函数，将ros message存入相应的buffer中
     ros::Subscriber subCornerPointsSharp = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_sharp", 100, laserCloudSharpHandler);
-
+// 创建一个ROS订阅者（Subscriber）
+// 订阅的主题名称是 "/laser_cloud_sharp"
+// 使用的消息类型是 sensor_msgs::PointCloud2
+// 队列长度设置为 100，表示最多可以缓存 100 条消息
+// 当有新消息到达时，将调用 laserCloudSharpHandler 函数来处理该消息
     ros::Subscriber subCornerPointsLessSharp = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_less_sharp", 100, laserCloudLessSharpHandler);
 
     ros::Subscriber subSurfPointsFlat = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_flat", 100, laserCloudFlatHandler);
@@ -201,7 +209,8 @@ int main(int argc, char **argv)
     ros::Subscriber subSurfPointsLessFlat = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_less_flat", 100, laserCloudLessFlatHandler);
 
     ros::Subscriber subLaserCloudFullRes = nh.subscribe<sensor_msgs::PointCloud2>("/velodyne_cloud_2", 100, laserCloudFullResHandler);
-
+    
+ // odometry节点发布的点云信息，主要是每一帧点云的corner点、surface点、以及odometry部分通过帧间匹配得到的粗略轨迹位姿
     ros::Publisher pubLaserCloudCornerLast = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_corner_last", 100);
 
     ros::Publisher pubLaserCloudSurfLast = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_surf_last", 100);
@@ -209,7 +218,7 @@ int main(int argc, char **argv)
     ros::Publisher pubLaserCloudFullRes = nh.advertise<sensor_msgs::PointCloud2>("/velodyne_cloud_3", 100);
 
     ros::Publisher pubLaserOdometry = nh.advertise<nav_msgs::Odometry>("/laser_odom_to_init", 100);
-
+    
     ros::Publisher pubLaserPath = nh.advertise<nav_msgs::Path>("/laser_odom_path", 100);
 
     nav_msgs::Path laserPath;
