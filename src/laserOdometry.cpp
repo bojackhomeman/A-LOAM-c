@@ -395,7 +395,7 @@ int main(int argc, char **argv)
                             corner_correspondence++;
                         }
                     }
-
+                    // 面特征匹配（这一块和上面线特征匹配大同小异）
                     // find correspondence for plane features
                     for (int i = 0; i < surfPointsFlatNum; ++i)
                     {
@@ -497,12 +497,13 @@ int main(int argc, char **argv)
 
                     //printf("coner_correspondance %d, plane_correspondence %d \n", corner_correspondence, plane_correspondence);
                     printf("data association time %f ms \n", t_data.toc());
-
+                    // 至此，点到线以及点到面距离已全部加入残差计算
+                    // 若线特征匹配+面特征匹配 匹配对过少
                     if ((corner_correspondence + plane_correspondence) < 10)
                     {
                         printf("less correspondence! *************************************************\n");
                     }
-
+                    // 使用ceres优化器进行优化
                     TicToc t_solver;
                     ceres::Solver::Options options;
                     options.linear_solver_type = ceres::DENSE_QR;
@@ -513,6 +514,10 @@ int main(int argc, char **argv)
                     printf("solver time %f ms \n", t_solver.toc());
                 }
                 printf("optimization twice time %f \n", t_opt.toc());
+                // 更新最新结果
+                // q_w_curr, t_w_curr是当前迭代优化得到的pose（当前帧相对于上一帧）
+                // q_last_curr, t_last_curr是上次迭代的pose（上一帧相对于世界坐标系）
+                // 因此当前帧相对于世界坐标系的pose计算如下：
 
                 t_w_curr = t_w_curr + q_w_curr * t_last_curr;
                 q_w_curr = q_w_curr * q_last_curr;
@@ -563,7 +568,8 @@ int main(int argc, char **argv)
                     TransformToEnd(&laserCloudFullRes->points[i], &laserCloudFullRes->points[i]);
                 }
             }
-
+            // 发布每一帧的pose（odometry），给后续的mapping部分使用，
+            // publish odometry
             pcl::PointCloud<PointType>::Ptr laserCloudTemp = cornerPointsLessSharp;
             cornerPointsLessSharp = laserCloudCornerLast;
             laserCloudCornerLast = laserCloudTemp;
