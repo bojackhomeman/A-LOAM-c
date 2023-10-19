@@ -238,13 +238,14 @@ void process()
 			mBuf.lock();
 			while (!odometryBuf.empty() && odometryBuf.front()->header.stamp.toSec() < cornerLastBuf.front()->header.stamp.toSec())
 				odometryBuf.pop();
-			if (odometryBuf.empty())
+			// laserOdometry模块对本节点的执行频率进行了控制，laserOdometry模块publish的位姿是10Hz，点云的publish频率则可能没这么高
+			if (odometryBuf.empty())  // 时间戳同步
 			{
 				mBuf.unlock();
 				break;
 			}
 
-			while (!surfLastBuf.empty() && surfLastBuf.front()->header.stamp.toSec() < cornerLastBuf.front()->header.stamp.toSec())
+			while (!surfLastBuf.empty() && surfLastBuf.front()->header.stamp.toSec() < cornerLastBuf.front()->header.stamp.toSec()) 
 				surfLastBuf.pop();
 			if (surfLastBuf.empty())
 			{
@@ -293,33 +294,40 @@ void process()
 			q_wodom_curr.w() = odometryBuf.front()->pose.pose.orientation.w;
 			t_wodom_curr.x() = odometryBuf.front()->pose.pose.position.x;
 			t_wodom_curr.y() = odometryBuf.front()->pose.pose.position.y;
-			t_wodom_curr.z() = odometryBuf.front()->pose.pose.position.z;
-			odometryBuf.pop();
+			t_wodom_curr.z() = odometryBuf.front()->pose.pose.position.z;   // 里程计部分publish的位姿
+			odometryBuf.pop();  // 考虑到实时性，就把队列里其他的都pop出去，不然可能出现处理延时的情况（这里没看太明白）
 
-			while(!cornerLastBuf.empty())
+			while(!cornerLastBuf.empty())  // 
 			{
 				cornerLastBuf.pop();
-				printf("drop lidar frame in mapping for real time performance \n");
+				printf("drop lidar frame in mapping for real time performance \n");  
+				// 为了保证LOAM算法整体的实时性，因Mapping线程耗时>100ms导致的历史缓存都会被清空
 			}
 
 			mBuf.unlock();
 
 			TicToc t_whole;
 
-			transformAssociateToMap();
+			transformAssociateToMap();   // 将odometry下的坐标，转换至世界坐标系下
 
+			// mapping中维护了一个21*21*11的cube（submap，栅格地图），即历史地图，并不断将当前帧与地图进行匹配，以优化odometry输出的粗略的位姿
+			// 首先需要知道当前帧在submap中的何处
 			TicToc t_shift;
-			int centerCubeI = int((t_w_curr.x() + 25.0) / 50.0) + laserCloudCenWidth;
-			int centerCubeJ = int((t_w_curr.y() + 25.0) / 50.0) + laserCloudCenHeight;
-			int centerCubeK = int((t_w_curr.z() + 25.0) / 50.0) + laserCloudCenDepth;
+			int centerCubeI = int((t_w_curr.x() + 25.0) / 50.0) + laserCloudCenWidth;  // * + 10
+			int centerCubeJ = int((t_w_curr.y() + 25.0) / 50.0) + laserCloudCenHeight; // * + 10
+			int centerCubeK = int((t_w_curr.z() + 25.0) / 50.0) + laserCloudCenDepth;  // * + 5
+			// 如果此时lidar中心位于（0~25），则center一直位于（10，10，5）
+			// 若lidar中心位于（25~75），则center一直处于（11，11，6）
 
-			if (t_w_curr.x() + 25.0 < 0)
+			if (t_w_curr.x() + 25.0 < 0)   // int(-2.5) = -2,而期望情况是int(-2.5) = -3，因此手动向左-1
 				centerCubeI--;
 			if (t_w_curr.y() + 25.0 < 0)
 				centerCubeJ--;
 			if (t_w_curr.z() + 25.0 < 0)
 				centerCubeK--;
 
+			// 调整取值范围:3 < centerCubeI < 18， 3 < centerCubeJ < 18, 3 < centerCubeK < 8
+			// 如果cube处于边界，则将cube向中心靠拢一些，方便后续拓展cube
 			while (centerCubeI < 3)
 			{
 				for (int j = 0; j < laserCloudHeight; j++)
@@ -509,18 +517,21 @@ void process()
 			int laserCloudValidNum = 0;
 			int laserCloudSurroundNum = 0;
 
-			for (int i = centerCubeI - 2; i <= centerCubeI + 2; i++)
+			for (int i = centerCubeI - 2; i <= centerCubeI + 2; i++)   
+			// 5 * 5 * 3 = 75个栅格，每个栅格边长50m，即250m*250m*150m的一个局部地图
+			// 当前帧与以上局部地图进行匹配
 			{
 				for (int j = centerCubeJ - 2; j <= centerCubeJ + 2; j++)
 				{
 					for (int k = centerCubeK - 1; k <= centerCubeK + 1; k++)
 					{
-						if (i >= 0 && i < laserCloudWidth &&
+						if (i >= 0 && i < laserCloudWidth &&   // 坐标是否合法
 							j >= 0 && j < laserCloudHeight &&
 							k >= 0 && k < laserCloudDepth)
 						{ 
 							laserCloudValidInd[laserCloudValidNum] = i + laserCloudWidth * j + laserCloudWidth * laserCloudHeight * k;
 							laserCloudValidNum++;
+							// 构造，要与当前帧匹配的，小submap在大栅格地图中的indices
 							laserCloudSurroundInd[laserCloudSurroundNum] = i + laserCloudWidth * j + laserCloudWidth * laserCloudHeight * k;
 							laserCloudSurroundNum++;
 						}
@@ -528,9 +539,9 @@ void process()
 				}
 			}
 
-			laserCloudCornerFromMap->clear();
+			laserCloudCornerFromMap->clear();  
 			laserCloudSurfFromMap->clear();
-			for (int i = 0; i < laserCloudValidNum; i++)
+			for (int i = 0; i < laserCloudValidNum; i++)  // 构建要与当前帧匹配的submap
 			{
 				*laserCloudCornerFromMap += *laserCloudCornerArray[laserCloudValidInd[i]];
 				*laserCloudSurfFromMap += *laserCloudSurfArray[laserCloudValidInd[i]];
@@ -538,7 +549,7 @@ void process()
 			int laserCloudCornerFromMapNum = laserCloudCornerFromMap->points.size();
 			int laserCloudSurfFromMapNum = laserCloudSurfFromMap->points.size();
 
-
+			// 当前帧与submap进行匹配，对当前帧进行voxel down sampling(submap在构建的时候，也做了voxel down sampling)
 			pcl::PointCloud<PointType>::Ptr laserCloudCornerStack(new pcl::PointCloud<PointType>());
 			downSizeFilterCorner.setInputCloud(laserCloudCornerLast);
 			downSizeFilterCorner.filter(*laserCloudCornerStack);
@@ -551,7 +562,7 @@ void process()
 
 			printf("map prepare time %f ms\n", t_shift.toc());
 			printf("map corner num %d  surf num %d \n", laserCloudCornerFromMapNum, laserCloudSurfFromMapNum);
-			if (laserCloudCornerFromMapNum > 10 && laserCloudSurfFromMapNum > 50)
+			if (laserCloudCornerFromMapNum > 10 && laserCloudSurfFromMapNum > 50)  // 如果找到一个足够大的局部地图与当前帧匹配
 			{
 				TicToc t_opt;
 				TicToc t_tree;
@@ -559,17 +570,17 @@ void process()
 				kdtreeSurfFromMap->setInputCloud(laserCloudSurfFromMap);
 				printf("build tree time %f ms \n", t_tree.toc());
 
-				for (int iterCount = 0; iterCount < 2; iterCount++)
+				for (int iterCount = 0; iterCount < 2; iterCount++)    // 整体做两遍ICP
 				{
 					//ceres::LossFunction *loss_function = NULL;
 					ceres::LossFunction *loss_function = new ceres::HuberLoss(0.1);
 					ceres::LocalParameterization *q_parameterization =
-						new ceres::EigenQuaternionParameterization();
+						new ceres::EigenQuaternionParameterization();   //这么定义是因为四元数不符合广义的加法
 					ceres::Problem::Options problem_options;
 
 					ceres::Problem problem(problem_options);
-					problem.AddParameterBlock(parameters, 4, q_parameterization);
-					problem.AddParameterBlock(parameters + 4, 3);
+					problem.AddParameterBlock(parameters, 4, q_parameterization);  //四元数，parameters的前4位
+					problem.AddParameterBlock(parameters + 4, 3);  //从 第parameters + 4 位置开始数3个为平移
 
 					TicToc t_data;
 					int corner_num = 0;
@@ -593,29 +604,31 @@ void process()
 								center = center + tmp;
 								nearCorners.push_back(tmp);
 							}
-							center = center / 5.0;
+							center = center / 5.0;   // submap中，找到的最近5点的质心
 
 							Eigen::Matrix3d covMat = Eigen::Matrix3d::Zero();
 							for (int j = 0; j < 5; j++)
 							{
-								Eigen::Matrix<double, 3, 1> tmpZeroMean = nearCorners[j] - center;
-								covMat = covMat + tmpZeroMean * tmpZeroMean.transpose();
+								Eigen::Matrix<double, 3, 1> tmpZeroMean = nearCorners[j] - center;  // 去质心操作
+								covMat = covMat + tmpZeroMean * tmpZeroMean.transpose();  // 计算协方差矩阵（3xN * N*3矩阵可以拆成N个秩一矩阵之和（一列*一行））
 							}
 
 							Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> saes(covMat);
 
 							// if is indeed line feature
 							// note Eigen library sort eigenvalues in increasing order
-							Eigen::Vector3d unit_direction = saes.eigenvectors().col(2);
+							Eigen::Vector3d unit_direction = saes.eigenvectors().col(2);  // 最大的特征向量
 							Eigen::Vector3d curr_point(pointOri.x, pointOri.y, pointOri.z);
-							if (saes.eigenvalues()[2] > 3 * saes.eigenvalues()[1])
+							if (saes.eigenvalues()[2] > 3 * saes.eigenvalues()[1])  
+							// 最大的特征值比次大的特征值3倍还大，说明submap中找到的5个点在一条直线上，表现为1个大特征值和2个小特征值
 							{ 
 								Eigen::Vector3d point_on_line = center;
 								Eigen::Vector3d point_a, point_b;
-								point_a = 0.1 * unit_direction + point_on_line;
+								point_a = 0.1 * unit_direction + point_on_line;  // 构建两个虚拟的点，连接成线
 								point_b = -0.1 * unit_direction + point_on_line;
 
 								ceres::CostFunction *cost_function = LidarEdgeFactor::Create(curr_point, point_a, point_b, 1.0);
+								// 点到线的距离
 								problem.AddResidualBlock(cost_function, loss_function, parameters, parameters + 4);
 								corner_num++;	
 							}							
@@ -644,10 +657,10 @@ void process()
 					{
 						pointOri = laserCloudSurfStack->points[i];
 						//double sqrtDis = pointOri.x * pointOri.x + pointOri.y * pointOri.y + pointOri.z * pointOri.z;
-						pointAssociateToMap(&pointOri, &pointSel);
+						pointAssociateToMap(&pointOri, &pointSel);  // 将当前帧的点，转换到世界坐标系（W）下
 						kdtreeSurfFromMap->nearestKSearch(pointSel, 5, pointSearchInd, pointSearchSqDis);
 
-						Eigen::Matrix<double, 5, 3> matA0;
+						Eigen::Matrix<double, 5, 3> matA0;   // 存储在submap中找到的最近的5个点
 						Eigen::Matrix<double, 5, 1> matB0 = -1 * Eigen::Matrix<double, 5, 1>::Ones();
 						if (pointSearchSqDis[4] < 1.0)
 						{
@@ -731,14 +744,16 @@ void process()
 			{
 				ROS_WARN("time Map corner and surf num are not enough");
 			}
-			transformUpdate();
+			transformUpdate();   
+			// 上面的逻辑，用当前帧与局部地图做匹配，得到了一个更为准确的q_w_curr, t_w_curr
+			// 用更为准确的q_w_curr, t_w_curr, 更新增量 q_wmap_wodom, t_wmap_wodom, 即odom坐标系与世界坐标系W之间的转换关系
 
-			TicToc t_add;
+			TicToc t_add;   // 栅格地图的构建
 			for (int i = 0; i < laserCloudCornerStackNum; i++)
 			{
-				pointAssociateToMap(&laserCloudCornerStack->points[i], &pointSel);
+				pointAssociateToMap(&laserCloudCornerStack->points[i], &pointSel); // L -> W
 
-				int cubeI = int((pointSel.x + 25.0) / 50.0) + laserCloudCenWidth;
+				int cubeI = int((pointSel.x + 25.0) / 50.0) + laserCloudCenWidth;  // 找此点在哪一个cube
 				int cubeJ = int((pointSel.y + 25.0) / 50.0) + laserCloudCenHeight;
 				int cubeK = int((pointSel.z + 25.0) / 50.0) + laserCloudCenDepth;
 
@@ -754,7 +769,7 @@ void process()
 					cubeK >= 0 && cubeK < laserCloudDepth)
 				{
 					int cubeInd = cubeI + laserCloudWidth * cubeJ + laserCloudWidth * laserCloudHeight * cubeK;
-					laserCloudCornerArray[cubeInd]->push_back(pointSel);
+					laserCloudCornerArray[cubeInd]->push_back(pointSel); // 存入cube
 				}
 			}
 
@@ -784,7 +799,7 @@ void process()
 			printf("add points time %f ms\n", t_add.toc());
 
 			
-			TicToc t_filter;
+			TicToc t_filter;   // 对submap中的点云进行voxel down sampling
 			for (int i = 0; i < laserCloudValidNum; i++)
 			{
 				int ind = laserCloudValidInd[i];
@@ -891,6 +906,7 @@ void process()
         std::this_thread::sleep_for(dura);
 	}
 }
+
 
 int main(int argc, char **argv)
 {
