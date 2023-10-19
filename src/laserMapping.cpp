@@ -897,22 +897,24 @@ int main(int argc, char **argv)
 	ros::init(argc, argv, "laserMapping");
 	ros::NodeHandle nh;
 
-	float lineRes = 0;
+	float lineRes = 0;   // 分辨率
 	float planeRes = 0;
 	nh.param<float>("mapping_line_resolution", lineRes, 0.4);
 	nh.param<float>("mapping_plane_resolution", planeRes, 0.8);
 	printf("line resolution %f plane resolution %f \n", lineRes, planeRes);
-	downSizeFilterCorner.setLeafSize(lineRes, lineRes,lineRes);
-	downSizeFilterSurf.setLeafSize(planeRes, planeRes, planeRes);
-
+	downSizeFilterCorner.setLeafSize(lineRes, lineRes,lineRes);   // corner点下采样类
+	downSizeFilterSurf.setLeafSize(planeRes, planeRes, planeRes);  // surface点下采样类
+	
+    // handler函数，将odometry部分发布的点云存入buffer中
+    
+    // 获取odometry中发布的每一帧corner点
 	ros::Subscriber subLaserCloudCornerLast = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_corner_last", 100, laserCloudCornerLastHandler);
-
+	// 获取odometry中发布的每一帧surface点
 	ros::Subscriber subLaserCloudSurfLast = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_surf_last", 100, laserCloudSurfLastHandler);
-
+	// 获取odometry中发布的每一帧odometry信息（即pose）
 	ros::Subscriber subLaserOdometry = nh.subscribe<nav_msgs::Odometry>("/laser_odom_to_init", 100, laserOdometryHandler);
-
-	ros::Subscriber subLaserCloudFullRes = nh.subscribe<sensor_msgs::PointCloud2>("/velodyne_cloud_3", 100, laserCloudFullResHandler);
-
+	
+    // 发布
 	pubLaserCloudSurround = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_surround", 100);
 
 	pubLaserCloudMap = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_map", 100);
@@ -924,14 +926,17 @@ int main(int argc, char **argv)
 	pubOdomAftMappedHighFrec = nh.advertise<nav_msgs::Odometry>("/aft_mapped_to_init_high_frec", 100);
 
 	pubLaserAfterMappedPath = nh.advertise<nav_msgs::Path>("/aft_mapped_path", 100);
-
-	for (int i = 0; i < laserCloudNum; i++)
+	
+    // laserCloudNum = 21 * 21 * 11 = 4851, 即栅格地图的总大小
+    // 栅格地图即一个21 * 21 * 11大小的cubes，这里将corner点与surface点分开存储，分别存储在laserCloudCornerArray与laserCloudSurfArray中
+	for (int i = 0; i < laserCloudNum; i++)  // 释放空间，清空
 	{
 		laserCloudCornerArray[i].reset(new pcl::PointCloud<PointType>());
 		laserCloudSurfArray[i].reset(new pcl::PointCloud<PointType>());
 	}
-
-	std::thread mapping_process{process};
+	
+    // 主线程，运行process函数
+	std::thread mapping_process{process};  
 
 	ros::spin();
 
